@@ -230,6 +230,38 @@ def test_get_current_database_schema() -> None:
     sql("DROP SCHEMA test_schema;", engine=engine)
 
 
+@pytest.mark.skipif(not HAS_DUCKDB, reason="duckdb not installed")
+def test_get_default_database_schema_duckdb_2_relation() -> None:
+    """Regression test for marimo-team/marimo#11456.
+
+    DuckDB 2.0 removed fetchone() from relations, so the previous
+    implementation silently returned None for both defaults and
+    get_schemas(database=None) returned []. This exercises the
+    limit(1).fetchall() replacement and the downstream schema listing,
+    including a follow-up query on the same connection.
+    """
+    import duckdb
+
+    conn = duckdb.connect(":memory:")
+    try:
+        engine = DuckDBEngine(conn, engine_name=VariableName("test_duckdb"))
+        assert engine.get_default_database() == "memory"
+        assert engine.get_default_schema() == "main"
+        assert [
+            schema.name
+            for schema in engine.get_schemas(
+                database=None,
+                include_tables=True,
+                include_table_details=False,
+            )
+        ] == ["main"]
+        # A follow-up query on the same connection must still work.
+        assert engine.get_default_database() == "memory"
+        assert engine.get_default_schema() == "main"
+    finally:
+        conn.close()
+
+
 @pytest.mark.skipif(
     not HAS_DUCKDB or not HAS_POLARS or not HAS_PANDAS,
     reason="duckdb, polars and pandas not installed",
