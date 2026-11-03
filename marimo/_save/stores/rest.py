@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import urllib.error
 import urllib.request
+from urllib.parse import quote, unquote
 
 from marimo import _loggers
 from marimo._save.stores.store import Store
@@ -54,6 +55,25 @@ class RestStore(Store):
             LOGGER.warning(f"GET {url} - Error: {e}")
         return None
 
+    def read(self, key: str) -> bytes | None:
+        url = self._get_url(key)
+        req = urllib.request.Request(url, headers=self.headers)
+        try:
+            with urllib.request.urlopen(req, context=self.context) as response:
+                if response.status == 200:
+                    return response.read()  # type: ignore[no-any-return]
+                raise urllib.error.HTTPError(
+                    url,
+                    response.status,
+                    "Unexpected status",
+                    response.headers,
+                    None,
+                )
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            raise
+
     def put(self, key: str, value: bytes) -> bool:
         url = self._get_url(key)
         req = urllib.request.Request(
@@ -98,4 +118,13 @@ class RestStore(Store):
         url = self.base_url
         if self.project_id:
             url = f"{url}/{self.project_id}"
-        return f"{url}/{key}"
+        return f"{url}/{self._encode_key(key)}"
+
+    @staticmethod
+    def _encode_key(key: str) -> str:
+        # Keys are logical paths, not pre-encoded URLs: encode each
+        # segment so spaces reach the server, preserving "/" separators.
+        # Unquoting first keeps an already-escaped key from encoding twice.
+        return "/".join(
+            quote(unquote(segment), safe="") for segment in key.split("/")
+        )
